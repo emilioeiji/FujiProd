@@ -31,7 +31,7 @@ public sealed class ServiceConfig
 
         if (!File.Exists(settingsPath))
         {
-            throw new FileNotFoundException("O arquivo appsettings.json não foi encontrado.", settingsPath);
+            throw new FileNotFoundException($"Arquivo não encontrado: {settingsPath}", settingsPath);
         }
 
         using var stream = File.OpenRead(settingsPath);

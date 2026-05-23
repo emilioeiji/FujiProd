@@ -23,10 +23,20 @@ public sealed class MacroRunnerService : IDisposable
         _settingsPath = settingsPath;
         _logger = logger;
 
+        _logger.Info($"Verificando arquivo: {settingsPath}");
+
         if (ServiceConfig.TryLoad(settingsPath, out var loadedConfig, out var loadError))
         {
             _config = loadedConfig!;
-            _logger.UpdateLogFolder(_config.LogFolder);
+            try
+            {
+                ValidateDirectoryPath("LogFolder", _config.LogFolder);
+                _logger.UpdateLogFolder(_config.LogFolder);
+            }
+            catch (Exception ex)
+            {
+                _logger.Exception("Falha ao validar LogFolder na inicialização", ex);
+            }
         }
         else
         {
@@ -502,24 +512,18 @@ public sealed class MacroRunnerService : IDisposable
 
     private void ValidateConfiguredPaths()
     {
-        if (!File.Exists(_config.BatPath))
-        {
-            throw new FileNotFoundException("Arquivo BAT não encontrado.", _config.BatPath);
-        }
+        ValidateDirectoryPath("LogFolder", _config.LogFolder);
+        ValidateFilePath("BatPath", _config.BatPath);
 
         foreach (var job in _config.ExcelJobs)
         {
-            if (!File.Exists(job.ExcelFilePath))
-            {
-                throw new FileNotFoundException($"Workbook do job '{job.Name}' não encontrado.", job.ExcelFilePath);
-            }
+            ValidateFilePath($"ExcelFilePath ({job.Name})", job.ExcelFilePath);
         }
 
+        WarnIfMappedDrive(_config.HtmlPath);
         var htmlDirectory = Path.GetDirectoryName(_config.HtmlPath);
-        if (string.IsNullOrWhiteSpace(htmlDirectory) || !Directory.Exists(htmlDirectory))
-        {
-            _logger.Warning($"A pasta do HTML ainda não existe: {_config.HtmlPath}");
-        }
+        ValidateDirectoryPath("Pasta do HtmlPath", htmlDirectory);
+        ValidateFilePath("HtmlPath", _config.HtmlPath);
     }
 
     private void CheckHtmlTimeout(HtmlWatchdogState watchdogState)
@@ -596,7 +600,10 @@ public sealed class MacroRunnerService : IDisposable
     {
         try
         {
+            _logger.Info($"Verificando arquivo: {_settingsPath}");
             var loadedConfig = ServiceConfig.Load(_settingsPath);
+            ValidateDirectoryPath("LogFolder", loadedConfig.LogFolder);
+            WarnIfMappedDrive(loadedConfig.HtmlPath);
 
             lock (_snapshotLock)
             {
@@ -615,6 +622,71 @@ public sealed class MacroRunnerService : IDisposable
         catch (Exception ex)
         {
             errorMessage = $"Erro ao carregar appsettings.json: {ex.Message}";
+            return false;
+        }
+    }
+
+    private void ValidateFilePath(string settingName, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new FileNotFoundException($"Arquivo não encontrado: {path ?? string.Empty}", path);
+        }
+
+        _logger.Info($"Verificando arquivo: {path}");
+
+        if (!File.Exists(path))
+        {
+            throw new FileNotFoundException($"Arquivo não encontrado: {path}", path);
+        }
+
+        _logger.Info($"{settingName} OK: {path}");
+    }
+
+    private void ValidateDirectoryPath(string settingName, string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            throw new DirectoryNotFoundException($"Pasta não encontrada: {path ?? string.Empty}");
+        }
+
+        _logger.Info($"Verificando pasta: {path}");
+
+        if (!Directory.Exists(path))
+        {
+            throw new DirectoryNotFoundException($"Pasta não encontrada: {path}");
+        }
+
+        _logger.Info($"{settingName} OK: {path}");
+    }
+
+    private void WarnIfMappedDrive(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var root = Path.GetPathRoot(path);
+        if (string.IsNullOrWhiteSpace(root) || root.Length < 2 || root[1] != ':')
+        {
+            return;
+        }
+
+        if (IsNetworkDrive(root) || !root.StartsWith("C:", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.Warning(@"Drive mapeado detectado. Recomenda-se usar caminho UNC \\servidor\pasta para execução automática.");
+        }
+    }
+
+    private static bool IsNetworkDrive(string root)
+    {
+        try
+        {
+            return new DriveInfo(root).DriveType == DriveType.Network;
+        }
+        catch
+        {
             return false;
         }
     }

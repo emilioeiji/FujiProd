@@ -46,7 +46,60 @@ public sealed class FileLogger
 
     public void Exception(string context, Exception exception)
     {
-        Write("ERROR", $"{context} | {exception.GetType().Name}: {exception.Message}");
+        Write("ERROR", $"{context} | {FormatException(exception)}");
+    }
+
+    private static string FormatException(Exception exception)
+    {
+        var builder = new StringBuilder();
+        var current = exception;
+        var depth = 0;
+
+        while (current is not null)
+        {
+            if (depth > 0)
+            {
+                builder.Append(" | Inner: ");
+            }
+
+            builder.Append(current.GetType().Name);
+
+            if (!string.IsNullOrWhiteSpace(current.Message))
+            {
+                builder.Append(": ");
+                builder.Append(current.Message);
+            }
+
+            if (current is FileNotFoundException fileNotFound &&
+                !string.IsNullOrWhiteSpace(fileNotFound.FileName))
+            {
+                builder.Append(" | FileName: ");
+                builder.Append(fileNotFound.FileName);
+            }
+
+            if (current is DirectoryNotFoundException)
+            {
+                builder.Append(" | Verifique se a pasta existe e esta acessivel pelo usuario que executa o app.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(current.StackTrace))
+            {
+                var firstStackLine = current.StackTrace
+                    .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+                    .FirstOrDefault();
+
+                if (!string.IsNullOrWhiteSpace(firstStackLine))
+                {
+                    builder.Append(" | Stack: ");
+                    builder.Append(firstStackLine.Trim());
+                }
+            }
+
+            current = current.InnerException;
+            depth++;
+        }
+
+        return builder.ToString();
     }
 
     private void Write(string level, string message)
